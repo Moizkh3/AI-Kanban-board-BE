@@ -13,7 +13,7 @@ const aiRoutes = require("./routes/ai.routes");
 
 const app = express();
 
-// ── Middleware ───────────────────────────────────────────────────────────────
+// ── CORS ──────────────────────────────────────────────────────────────────────
 const allowedOrigins = [
   "http://localhost:5173",
   process.env.CLIENT_URL,
@@ -22,7 +22,7 @@ const allowedOrigins = [
 app.use(
   cors({
     origin: (origin, callback) => {
-      // Allow requests with no origin (like mobile apps or curl)
+      // Allow requests with no origin (e.g. curl, Postman, mobile apps)
       if (!origin || allowedOrigins.includes(origin)) {
         callback(null, true);
       } else {
@@ -35,22 +35,21 @@ app.use(
 app.use(express.json());
 
 // ── Routes ───────────────────────────────────────────────────────────────────
-app.use("/api/auth", authRoutes);
-app.use("/api/users", userRoutes);
-app.use("/api/boards", boardRoutes);
-app.use("/api/boards/:boardId/columns", columnRoutes);
-app.use("/api/boards/:boardId/tasks", taskRoutes);
-app.use("/api/boards/:boardId/ai", aiRoutes);
+app.use("/api/auth",                      authRoutes);
+app.use("/api/users",                     userRoutes);
+app.use("/api/boards",                    boardRoutes);
+app.use("/api/boards/:boardId/columns",   columnRoutes);
+app.use("/api/boards/:boardId/tasks",     taskRoutes);
+app.use("/api/boards/:boardId/ai",        aiRoutes);
 
 // Health check
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
-// Root welcome route
+// Root
 app.get("/", (req, res) => {
-  res.setHeader("Content-Type", "text/html");
-  res.send("<h1>Flowboard API Server is running!</h1>");
+  res.json({ message: "Flowboard API Server is running 🚀" });
 });
 
 // ── Global error handler ─────────────────────────────────────────────────────
@@ -60,10 +59,24 @@ app.use((err, req, res, next) => {
   res.status(status).json({ error: err.message || "Internal server error" });
 });
 
-// ── Start ─────────────────────────────────────────────────────────────────────
-const PORT = process.env.PORT || 5050;
-connectDB().then(() => {
+// ── DB Connection ─────────────────────────────────────────────────────────────
+// Called at module load — works for both local (nodemon) and Vercel serverless
+let dbConnected = false;
+const ensureDB = async () => {
+  if (!dbConnected) {
+    await connectDB();
+    dbConnected = true;
+  }
+};
+ensureDB();
+
+// ── Local dev server (ignored by Vercel) ─────────────────────────────────────
+if (process.env.NODE_ENV !== "production") {
+  const PORT = process.env.PORT || 5050;
   app.listen(PORT, () => {
     console.log(`🚀 Server running on http://localhost:${PORT}`);
   });
-});
+}
+
+// ── Vercel requires this export ───────────────────────────────────────────────
+module.exports = app;
