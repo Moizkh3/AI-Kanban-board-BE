@@ -14,35 +14,7 @@ const aiRoutes = require("./routes/ai.routes");
 const app = express();
 
 // ── CORS ──────────────────────────────────────────────────────────────────────
-const corsOptions = {
-  origin: (origin, callback) => {
-    // Allow no-origin requests (curl, Postman, mobile)
-    if (!origin) return callback(null, true);
-
-    const normalise = (o) => o?.replace(/\/$/, ""); // strip trailing slash
-
-    const allowed = [
-      "http://localhost:5173",
-      process.env.CLIENT_URL,       // set this in Vercel env vars
-    ]
-      .filter(Boolean)
-      .map(normalise);
-
-    if (allowed.includes(normalise(origin))) {
-      callback(null, true);
-    } else {
-      console.warn("🚫 CORS blocked origin:", origin, "| allowed:", allowed);
-      callback(new Error(`CORS: origin '${origin}' is not allowed`));
-    }
-  },
-  credentials: true,
-  methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
-};
-
-// Handle all preflight OPTIONS requests before any other middleware
-app.options("*", cors(corsOptions));
-app.use(cors(corsOptions));
+app.use(cors());
 app.use(express.json());
 
 // ── Routes ───────────────────────────────────────────────────────────────────
