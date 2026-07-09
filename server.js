@@ -60,7 +60,7 @@ app.use((err, req, res, next) => {
 });
 
 // ── DB Connection ─────────────────────────────────────────────────────────────
-// Called at module load — works for both local (nodemon) and Vercel serverless
+// Called at module load — works for both local (nodemon) and Vercel serverless.
 let dbConnected = false;
 const ensureDB = async () => {
   if (!dbConnected) {
@@ -68,7 +68,9 @@ const ensureDB = async () => {
     dbConnected = true;
   }
 };
-ensureDB();
+ensureDB().catch((err) => {
+  console.error("❌ Failed to connect to MongoDB on startup:", err.message);
+});
 
 // ── Local dev server (ignored by Vercel) ─────────────────────────────────────
 if (process.env.NODE_ENV !== "production") {
