@@ -47,6 +47,12 @@ app.get("/api/health", (req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
+// Root welcome route
+app.get("/", (req, res) => {
+  res.setHeader("Content-Type", "text/html");
+  res.send("<h1>Flowboard API Server is running!</h1>");
+});
+
 // ── Global error handler ─────────────────────────────────────────────────────
 app.use((err, req, res, next) => {
   console.error("❌ Server error:", err.message);
