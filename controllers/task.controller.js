@@ -1,11 +1,38 @@
 const Task = require("../models/Task");
 const User = require("../models/User");
+const Attachment = require("../models/Attachment");
 const { logActivity } = require("../utils/activity");
 
 // ─── Helper ───────────────────────────────────────────────────────────────────
 
 const withAssignee = async (task) => {
   const assignee = task.assignee_id ? await User.findById(task.assignee_id) : null;
+
+  let attachments = [];
+  if (task.attachments && task.attachments.length > 0) {
+    const uploaderIds = task.attachments
+      .map((att) => att.uploaded_by)
+      .filter((id) => id);
+    const uploaders = uploaderIds.length > 0
+      ? await User.find({ _id: { $in: uploaderIds } })
+      : [];
+    const uploaderMap = uploaders.reduce((acc, u) => {
+      acc[u._id.toString()] = u.name;
+      return acc;
+    }, {});
+
+    attachments = task.attachments.map((att) => ({
+      id: att._id,
+      attachment_id: att.attachment_id,
+      filename: att.filename,
+      size: att.size,
+      contentType: att.contentType,
+      uploaded_by: att.uploaded_by,
+      uploader_name: att.uploaded_by ? uploaderMap[att.uploaded_by.toString()] || null : null,
+      uploaded_at: att.uploaded_at,
+    }));
+  }
+
   return {
     id: task._id,
     board_id: task.board_id,
@@ -19,6 +46,7 @@ const withAssignee = async (task) => {
     assignee_name: assignee?.name || null,
     assignee_email: assignee?.email || null,
     assignee_avatar: assignee?.avatar_url || null,
+    attachments,
     created_by: task.created_by,
     created_at: task.created_at,
     updated_at: task.updated_at,
@@ -166,4 +194,122 @@ const deleteTask = async (req, res, next) => {
   }
 };
 
-module.exports = { listTasks, createTask, updateTask, moveTask, deleteTask };
+// POST /api/boards/:boardId/tasks/:taskId/attachments
+const uploadAttachment = async (req, res, next) => {
+  try {
+    const { boardId, taskId } = req.params;
+    if (!req.file) {
+      return res.status(400).json({ error: "No file uploaded" });
+    }
+
+    const task = await Task.findOne({ _id: taskId, board_id: boardId });
+    if (!task) return res.status(404).json({ error: "Task not found" });
+
+    if (req.file.size > 15 * 1024 * 1024) {
+      return res.status(400).json({ error: "File size exceeds 15 MB limit" });
+    }
+
+    const attachment = await Attachment.create({
+      board_id: boardId,
+      task_id: taskId,
+      filename: req.file.originalname,
+      contentType: req.file.mimetype,
+      size: req.file.size,
+      data: req.file.buffer,
+      uploaded_by: req.user.id,
+    });
+
+    task.attachments.push({
+      attachment_id: attachment._id,
+      filename: attachment.filename,
+      size: attachment.size,
+      contentType: attachment.contentType,
+      uploaded_by: req.user.id,
+      uploaded_at: attachment.uploaded_at,
+    });
+
+    await task.save();
+
+    const serialized = await withAssignee(task);
+
+    await logActivity({
+      boardId,
+      userId: req.user.id,
+      action: "task.updated",
+      message: `${req.user.name} uploaded attachment "${attachment.filename}" to task "${task.title}"`,
+    });
+
+    res.status(201).json({ task: serialized });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// GET /api/boards/:boardId/tasks/:taskId/attachments/:attachmentId
+const downloadAttachment = async (req, res, next) => {
+  try {
+    const { boardId, taskId, attachmentId } = req.params;
+
+    const task = await Task.findOne({ _id: taskId, board_id: boardId });
+    if (!task) return res.status(404).json({ error: "Task not found" });
+
+    const attachment = await Attachment.findOne({ _id: attachmentId, task_id: taskId });
+    if (!attachment) return res.status(404).json({ error: "Attachment not found" });
+
+    res.setHeader("Content-Type", attachment.contentType);
+    const isInlineType = ["image/", "application/pdf", "text/plain"].some((p) =>
+      attachment.contentType.startsWith(p)
+    );
+    const disposition = isInlineType ? "inline" : "attachment";
+    res.setHeader(
+      "Content-Disposition",
+      `${disposition}; filename*=UTF-8''${encodeURIComponent(attachment.filename)}`
+    );
+    res.send(attachment.data);
+  } catch (err) {
+    next(err);
+  }
+};
+
+// DELETE /api/boards/:boardId/tasks/:taskId/attachments/:attachmentId
+const deleteAttachment = async (req, res, next) => {
+  try {
+    const { boardId, taskId, attachmentId } = req.params;
+
+    const task = await Task.findOne({ _id: taskId, board_id: boardId });
+    if (!task) return res.status(404).json({ error: "Task not found" });
+
+    const attachment = await Attachment.findOneAndDelete({ _id: attachmentId, task_id: taskId });
+    if (!attachment) return res.status(404).json({ error: "Attachment not found" });
+
+    task.attachments = task.attachments.filter(
+      (att) => att.attachment_id.toString() !== attachmentId
+    );
+
+    await task.save();
+
+    const serialized = await withAssignee(task);
+
+    await logActivity({
+      boardId,
+      userId: req.user.id,
+      action: "task.updated",
+      message: `${req.user.name} removed attachment "${attachment.filename}" from task "${task.title}"`,
+    });
+
+    res.json({ task: serialized });
+  } catch (err) {
+    next(err);
+  }
+};
+
+module.exports = {
+  listTasks,
+  createTask,
+  updateTask,
+  moveTask,
+  deleteTask,
+  uploadAttachment,
+  downloadAttachment,
+  deleteAttachment,
+};
