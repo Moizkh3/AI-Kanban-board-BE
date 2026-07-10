@@ -1,6 +1,7 @@
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
+const mongoose = require("mongoose");
 
 const connectDB = require("./config/db");
 
@@ -16,6 +17,38 @@ const app = express();
 // ── CORS ──────────────────────────────────────────────────────────────────────
 app.use(cors());
 app.use(express.json());
+
+// ── DB Connection Middleware ──────────────────────────────────────────────────
+// On Vercel serverless each invocation may be a cold start where the module-level
+// dbConnected flag is reset. We use mongoose.connection.readyState to check the
+// *real* connection state and reconnect if needed before every request.
+// readyState: 0 = disconnected, 1 = connected, 2 = connecting, 3 = disconnecting
+let dbConnectionPromise = null;
+
+app.use(async (req, res, next) => {
+  try {
+    const state = mongoose.connection.readyState;
+    if (state === 1) {
+      // Already connected
+      return next();
+    }
+    if (state === 2 && dbConnectionPromise) {
+      // In the middle of connecting – wait for it
+      await dbConnectionPromise;
+      return next();
+    }
+    // Not connected at all – initiate and cache the promise so concurrent
+    // cold-start requests share a single connection attempt.
+    dbConnectionPromise = connectDB();
+    await dbConnectionPromise;
+    dbConnectionPromise = null;
+    return next();
+  } catch (err) {
+    console.error("❌ DB connection error in middleware:", err.message);
+    dbConnectionPromise = null;
+    return res.status(503).json({ error: "Database unavailable. Please try again." });
+  }
+});
 
 // ── Routes ───────────────────────────────────────────────────────────────────
 app.use("/api/auth",                      authRoutes);
@@ -42,19 +75,6 @@ app.use((err, req, res, next) => {
   res.status(status).json({ error: err.message || "Internal server error" });
 });
 
-// ── DB Connection ─────────────────────────────────────────────────────────────
-// Called at module load — works for both local (nodemon) and Vercel serverless.
-let dbConnected = false;
-const ensureDB = async () => {
-  if (!dbConnected) {
-    await connectDB();
-    dbConnected = true;
-  }
-};
-ensureDB().catch((err) => {
-  console.error("❌ Failed to connect to MongoDB on startup:", err.message);
-});
-
 // ── Local dev server (ignored by Vercel) ─────────────────────────────────────
 if (process.env.NODE_ENV !== "production") {
   const PORT = process.env.PORT || 5050;
@@ -65,3 +85,4 @@ if (process.env.NODE_ENV !== "production") {
 
 // ── Vercel requires this export ───────────────────────────────────────────────
 module.exports = app;
+
