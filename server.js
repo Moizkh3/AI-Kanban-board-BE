@@ -14,7 +14,27 @@ const aiRoutes = require("./routes/ai.routes");
 const app = express();
 
 // ── CORS ──────────────────────────────────────────────────────────────────────
-app.use(cors());
+const ALLOWED_ORIGINS = [
+  "http://localhost:5173",
+  "http://localhost:3000",
+  process.env.CLIENT_URL,
+].filter(Boolean); // removes undefined if CLIENT_URL isn't set
+
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      // allow server-to-server requests (no origin) or whitelisted origins
+      if (!origin || ALLOWED_ORIGINS.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error(`CORS: origin '${origin}' not allowed`));
+      }
+    },
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+    credentials: true,
+  })
+);
 app.use(express.json());
 
 // ── Routes ───────────────────────────────────────────────────────────────────
